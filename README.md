@@ -2,6 +2,9 @@
 
 A 3D terrain generator and viewer that creates realistic landscapes using various procedural noise algorithms. Built with Python, PyOpenGL, and Pygame, this application renders interactive 3D terrain in real-time.
 
+![Terrain Simulator Icon](icon.png)
+
+
 ## Features
 
 - **Multiple Noise Algorithms:**
