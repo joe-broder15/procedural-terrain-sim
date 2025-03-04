@@ -1,5 +1,5 @@
 import pygame
-from pygame.locals import QUIT, KEYDOWN, KEYUP, K_ESCAPE, K_LEFT, K_RIGHT, K_UP, K_DOWN, K_q, OPENGL, DOUBLEBUF
+from pygame.locals import QUIT, KEYDOWN, KEYUP, K_ESCAPE, K_LEFT, K_RIGHT, K_UP, K_DOWN, K_q, K_e, OPENGL, DOUBLEBUF
 from OpenGL.GL import (
     glEnable, glDisable, glClear, glClearColor, glBegin, glEnd, 
     glVertex3fv, glNormal3fv, glColor3f, glMatrixMode, glLoadIdentity,
@@ -271,6 +271,13 @@ def main():
     rotation_x = 0
     rotation_y = 0
     
+    # Store initial rotation values for reset
+    initial_rotation_x = rotation_x
+    initial_rotation_y = rotation_y
+    
+    # Mouse capture state
+    mouse_captured = False
+    
     # Main loop
     clock = pygame.time.Clock()
     running = True
@@ -278,6 +285,24 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == KEYDOWN:
+                # Feature 1: Reset terrain position when 'e' is pressed
+                if event.key == K_e:
+                    rotation_x = initial_rotation_x
+                    rotation_y = initial_rotation_y
+                
+                # Feature 2: Toggle mouse capture when 'q' is pressed
+                elif event.key == K_q:
+                    mouse_captured = not mouse_captured
+                    pygame.mouse.set_visible(not mouse_captured)
+                    if mouse_captured:
+                        pygame.event.set_grab(True)
+                    else:
+                        pygame.event.set_grab(False)
+                
+                # Feature 3: Exit simulation when 'Escape' is pressed
+                elif event.key == K_ESCAPE:
+                    running = False
         
         # Handle keyboard input for rotation
         keys = pygame.key.get_pressed()
@@ -306,6 +331,9 @@ def main():
         pygame.display.flip()
         clock.tick(60)
     
+    # Ensure mouse is visible and not captured when exiting
+    pygame.mouse.set_visible(True)
+    pygame.event.set_grab(False)
     pygame.quit()
     sys.exit()
 
