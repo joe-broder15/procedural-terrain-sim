@@ -7,10 +7,18 @@ This application generates and renders 3D terrain using various noise algorithms
 (Perlin, Simplex, Ridged, Billow, Voronoi, or Combined). The terrain can be
 rotated, zoomed, and reset using keyboard controls.
 
-Controls:
+Controls (Default Orbit Mode):
 - Arrow keys: Rotate terrain
 - +/- keys: Zoom in/out
 - E key: Reset view
+- Q key: Toggle mouse capture
+- ESC key: Exit application
+
+Controls (Fly Mode - enabled with --fly flag):
+- W/A/S/D: Move forward/left/backward/right
+- Space/Shift: Move up/down
+- Mouse: Look around
+- E key: Reset position
 - Q key: Toggle mouse capture
 - ESC key: Exit application
 
@@ -27,9 +35,10 @@ import argparse
 # Third-party imports
 import pygame
 from pygame.locals import (
-    QUIT, KEYDOWN, KEYUP, VIDEORESIZE,
+    QUIT, KEYDOWN, KEYUP, VIDEORESIZE, MOUSEMOTION,
     K_ESCAPE, K_LEFT, K_RIGHT, K_UP, K_DOWN, 
     K_q, K_e, K_PLUS, K_MINUS, K_EQUALS,
+    K_w, K_a, K_s, K_d, K_SPACE, K_LSHIFT,
     OPENGL, DOUBLEBUF, RESIZABLE
 )
 import numpy as np
@@ -66,8 +75,13 @@ NOISE_LACUNARITY = 2.0   # Lacunarity for noise
 
 # Visual settings
 SKY_COLOR = (0.7, 0.8, 0.9, 1.0)  # Light blue
-ROTATION_SPEED = 1.0     # Speed of rotation when using arrow keys
-ZOOM_SPEED = 0.5         # Speed of zooming when using + and - keys
+ROTATION_SPEED = 1.0     # Speed of camera rotation when using arrow keys
+ZOOM_SPEED = 0.5         # Speed of camera zoom when using + and - keys
+
+# Free-flying camera settings
+FLY_MOVE_SPEED = 0.1     # Speed of camera movement in fly mode
+FLY_MOUSE_SENSITIVITY = 0.2  # Mouse sensitivity in fly mode
+FLY_INITIAL_POSITION = [0.0, 5.0, 10.0]  # Initial camera position in fly mode
 
 # =============================================================================
 # TERRAIN GENERATION
@@ -320,6 +334,8 @@ def setup_lighting():
     Configure OpenGL lighting for the scene.
     
     Sets up a single light source positioned above the terrain.
+    The light position is reset during rendering to maintain a fixed overhead position
+    even when the terrain rotates, creating dynamic shadows.
     """
     # Enable lighting
     glEnable(GL_LIGHTING)
@@ -327,7 +343,7 @@ def setup_lighting():
     glEnable(GL_COLOR_MATERIAL)
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
     
-    # Set up light position (overhead)
+    # Set up initial light position (overhead)
     light_position = [0.0, 10.0, 0.0, 1.0]
     glLightfv(GL_LIGHT0, GL_POSITION, light_position)
     
@@ -454,6 +470,13 @@ def parse_arguments():
         help='Size of terrain grid (size x size)'
     )
     
+    # Camera mode
+    parser.add_argument(
+        '--fly',
+        action='store_true',
+        help='Enable free-flying camera mode with WASD movement and mouse look'
+    )
+    
     return parser.parse_args()
 
 # =============================================================================
@@ -466,6 +489,18 @@ def main():
     
     Initializes the application, sets up the OpenGL environment,
     generates the terrain, and runs the main game loop.
+    
+    Controls:
+        Arrow keys: Rotate the terrain (in orbit mode)
+        +/- keys: Zoom in/out (in orbit mode)
+        E key: Reset camera position
+        Q key: Toggle mouse capture
+        Escape key: Exit the application
+        
+        In fly mode (--fly flag):
+            W/A/S/D: Move forward/left/backward/right
+            Space/Shift: Move up/down
+            Mouse: Look around
     """
     # Parse command line arguments
     args = parse_arguments()
@@ -518,15 +553,31 @@ def main():
         'rotation_x': 0,
         'rotation_y': 0,
         'zoom_distance': 10.0,
-        'mouse_captured': False
+        'mouse_captured': False,
+        'fly_mode': args.fly,
+        'position': FLY_INITIAL_POSITION.copy(),
+        'yaw': 0,
+        'pitch': 0,
+        'last_mouse_pos': None
     }
     
     # Store initial values for reset
     initial_state = {
         'rotation_x': camera_state['rotation_x'],
         'rotation_y': camera_state['rotation_y'],
-        'zoom_distance': camera_state['zoom_distance']
+        'zoom_distance': camera_state['zoom_distance'],
+        'position': FLY_INITIAL_POSITION.copy(),
+        'yaw': 0,
+        'pitch': 0
     }
+    
+    # If fly mode is enabled, capture the mouse by default
+    if camera_state['fly_mode']:
+        camera_state['mouse_captured'] = True
+        pygame.mouse.set_visible(False)
+        pygame.event.set_grab(True)
+        pygame.mouse.set_pos(WIDTH // 2, HEIGHT // 2)
+        camera_state['last_mouse_pos'] = (WIDTH // 2, HEIGHT // 2)
     
     # Run the main game loop
     run_game_loop(display, terrain, camera_state, initial_state)
@@ -547,6 +598,16 @@ def run_game_loop(display, terrain, camera_state, initial_state):
     """
     clock = pygame.time.Clock()
     running = True
+    
+    # Display control information if in fly mode
+    if camera_state['fly_mode']:
+        print("\nFly Mode Controls:")
+        print("  W/A/S/D: Move forward/left/backward/right")
+        print("  Space/Shift: Move up/down")
+        print("  Mouse: Look around")
+        print("  Q: Toggle mouse capture")
+        print("  E: Reset camera position")
+        print("  Escape: Exit\n")
     
     while running:
         # Handle events
@@ -591,15 +652,23 @@ def handle_events(display, camera_state, initial_state):
         elif event.type == KEYDOWN:
             # Reset terrain position when 'e' is pressed
             if event.key == K_e:
-                camera_state['rotation_x'] = initial_state['rotation_x']
-                camera_state['rotation_y'] = initial_state['rotation_y']
-                camera_state['zoom_distance'] = initial_state['zoom_distance']
+                if camera_state['fly_mode']:
+                    camera_state['position'] = initial_state['position'].copy()
+                    camera_state['yaw'] = initial_state['yaw']
+                    camera_state['pitch'] = initial_state['pitch']
+                else:
+                    camera_state['rotation_x'] = initial_state['rotation_x']
+                    camera_state['rotation_y'] = initial_state['rotation_y']
+                    camera_state['zoom_distance'] = initial_state['zoom_distance']
             
             # Toggle mouse capture when 'q' is pressed
             elif event.key == K_q:
                 camera_state['mouse_captured'] = not camera_state['mouse_captured']
                 pygame.mouse.set_visible(not camera_state['mouse_captured'])
                 pygame.event.set_grab(camera_state['mouse_captured'])
+                if camera_state['mouse_captured']:
+                    pygame.mouse.set_pos(WIDTH // 2, HEIGHT // 2)
+                    camera_state['last_mouse_pos'] = (WIDTH // 2, HEIGHT // 2)
             
             # Exit simulation when 'Escape' is pressed
             elif event.key == K_ESCAPE:
@@ -607,30 +676,92 @@ def handle_events(display, camera_state, initial_state):
             
             # Zoom in with + key (also handle = key which is the unshifted + on most keyboards)
             elif event.key == K_PLUS or event.key == K_EQUALS:
-                camera_state['zoom_distance'] = max(2.0, camera_state['zoom_distance'] - ZOOM_SPEED)
+                if not camera_state['fly_mode']:
+                    camera_state['zoom_distance'] = max(2.0, camera_state['zoom_distance'] - ZOOM_SPEED)
             
             # Zoom out with - key
             elif event.key == K_MINUS:
-                camera_state['zoom_distance'] = min(20.0, camera_state['zoom_distance'] + ZOOM_SPEED)
+                if not camera_state['fly_mode']:
+                    camera_state['zoom_distance'] = min(20.0, camera_state['zoom_distance'] + ZOOM_SPEED)
+        
+        # Handle mouse movement for free-flying camera
+        elif event.type == MOUSEMOTION and camera_state['mouse_captured'] and camera_state['fly_mode']:
+            if camera_state['last_mouse_pos'] is None:
+                camera_state['last_mouse_pos'] = event.pos
+            else:
+                dx = event.pos[0] - camera_state['last_mouse_pos'][0]
+                dy = event.pos[1] - camera_state['last_mouse_pos'][1]
+                
+                # Update camera yaw and pitch
+                camera_state['yaw'] -= dx * FLY_MOUSE_SENSITIVITY
+                camera_state['pitch'] -= dy * FLY_MOUSE_SENSITIVITY
+                
+                # Clamp pitch to avoid gimbal lock
+                camera_state['pitch'] = max(-89.0, min(89.0, camera_state['pitch']))
+                
+                # Reset mouse position to center to allow for continuous rotation
+                pygame.mouse.set_pos(WIDTH // 2, HEIGHT // 2)
+                camera_state['last_mouse_pos'] = (WIDTH // 2, HEIGHT // 2)
     
     return True
 
 def handle_keyboard_input(camera_state):
     """
-    Handle keyboard input for camera rotation.
+    Handle keyboard input for camera control.
     
     Args:
         camera_state (dict): Current camera state
     """
     keys = pygame.key.get_pressed()
-    if keys[pygame.K_LEFT]:
-        camera_state['rotation_y'] += ROTATION_SPEED
-    if keys[pygame.K_RIGHT]:
-        camera_state['rotation_y'] -= ROTATION_SPEED
-    if keys[pygame.K_UP]:
-        camera_state['rotation_x'] += ROTATION_SPEED
-    if keys[pygame.K_DOWN]:
-        camera_state['rotation_x'] -= ROTATION_SPEED
+    
+    if camera_state['fly_mode']:
+        # Calculate forward vector based on yaw and pitch
+        yaw_rad = math.radians(camera_state['yaw'])
+        pitch_rad = math.radians(camera_state['pitch'])
+        
+        # Forward vector
+        forward_x = math.sin(yaw_rad) * math.cos(pitch_rad)
+        forward_y = math.sin(pitch_rad)
+        forward_z = math.cos(yaw_rad) * math.cos(pitch_rad)
+        
+        # Right vector (cross product of forward and world up)
+        right_x = math.sin(yaw_rad - math.pi/2)
+        right_y = 0
+        right_z = math.cos(yaw_rad - math.pi/2)
+        
+        # Handle WASD movement
+        if keys[pygame.K_w]:  # Forward
+            camera_state['position'][0] += forward_x * FLY_MOVE_SPEED
+            camera_state['position'][1] += forward_y * FLY_MOVE_SPEED
+            camera_state['position'][2] += forward_z * FLY_MOVE_SPEED
+        if keys[pygame.K_s]:  # Backward
+            camera_state['position'][0] -= forward_x * FLY_MOVE_SPEED
+            camera_state['position'][1] -= forward_y * FLY_MOVE_SPEED
+            camera_state['position'][2] -= forward_z * FLY_MOVE_SPEED
+        if keys[pygame.K_a]:  # Left
+            camera_state['position'][0] -= right_x * FLY_MOVE_SPEED
+            camera_state['position'][1] -= right_y * FLY_MOVE_SPEED
+            camera_state['position'][2] -= right_z * FLY_MOVE_SPEED
+        if keys[pygame.K_d]:  # Right
+            camera_state['position'][0] += right_x * FLY_MOVE_SPEED
+            camera_state['position'][1] += right_y * FLY_MOVE_SPEED
+            camera_state['position'][2] += right_z * FLY_MOVE_SPEED
+        
+        # Up/Down movement (space/shift)
+        if keys[pygame.K_SPACE]:  # Up
+            camera_state['position'][1] += FLY_MOVE_SPEED
+        if keys[pygame.K_LSHIFT]:  # Down
+            camera_state['position'][1] -= FLY_MOVE_SPEED
+    else:
+        # Original orbit camera controls
+        if keys[pygame.K_LEFT]:
+            camera_state['rotation_y'] += ROTATION_SPEED
+        if keys[pygame.K_RIGHT]:
+            camera_state['rotation_y'] -= ROTATION_SPEED
+        if keys[pygame.K_UP]:
+            camera_state['rotation_x'] += ROTATION_SPEED
+        if keys[pygame.K_DOWN]:
+            camera_state['rotation_x'] -= ROTATION_SPEED
 
 def render_scene(terrain, camera_state):
     """
@@ -646,17 +777,41 @@ def render_scene(terrain, camera_state):
     # Apply camera transformations
     glLoadIdentity()
     
-    # Position camera with zoom
-    zoom = camera_state['zoom_distance']
-    gluLookAt(
-        zoom, zoom, zoom,  # Eye position with zoom
-        0, 0, 0,           # Look at position
-        0, 1, 0            # Up vector
-    )
+    if camera_state['fly_mode']:
+        # Free-flying camera mode
+        # Calculate look-at point based on yaw and pitch
+        yaw_rad = math.radians(camera_state['yaw'])
+        pitch_rad = math.radians(camera_state['pitch'])
+        
+        # Calculate the look-at point
+        look_x = camera_state['position'][0] + math.sin(yaw_rad) * math.cos(pitch_rad)
+        look_y = camera_state['position'][1] + math.sin(pitch_rad)
+        look_z = camera_state['position'][2] + math.cos(yaw_rad) * math.cos(pitch_rad)
+        
+        # Set up the camera
+        gluLookAt(
+            camera_state['position'][0], camera_state['position'][1], camera_state['position'][2],  # Eye position
+            look_x, look_y, look_z,  # Look at position
+            0, 1, 0                  # Up vector
+        )
+    else:
+        # Original orbit camera mode
+        # Position camera with zoom
+        zoom = camera_state['zoom_distance']
+        gluLookAt(
+            zoom, zoom, zoom,  # Eye position with zoom
+            0, 0, 0,           # Look at position
+            0, 1, 0            # Up vector
+        )
     
     # Apply rotations
     glRotatef(camera_state['rotation_x'], 1, 0, 0)
     glRotatef(camera_state['rotation_y'], 0, 1, 0)
+    
+    # Reset light position to keep it fixed in world space (overhead)
+    # This ensures the light doesn't rotate with the terrain
+    light_position = [0.0, 10.0, 0.0, 1.0]
+    glLightfv(GL_LIGHT0, GL_POSITION, light_position)
     
     # Render terrain
     terrain.render()
