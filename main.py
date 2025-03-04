@@ -1,50 +1,41 @@
-"""
-Procedural Terrain Simulator
-----------------------------
+'''Procedural Terrain Simulator
+
 A 3D terrain generator and viewer using procedural noise algorithms.
 
-This application generates and renders 3D terrain using various noise algorithms
-(Perlin, Simplex, Ridged, Billow, Voronoi, or Combined). The terrain can be
-rotated, zoomed, and reset using keyboard controls.
+Usage:
+    python main.py [options]
 
-Controls (Default Orbit Mode):
-- Arrow keys: Rotate terrain
-- +/- keys: Zoom in/out
-- E key: Reset view
-- Q key: Toggle mouse capture
-- ESC key: Exit application
+Options:
+    --noise           Type of noise for terrain generation (default: perlin)
+    --seed            Random seed (default: random)
+    --octaves         Number of octaves (default: 6)
+    --persistence     Noise persistence (default: 0.5)
+    --lacunarity      Noise lacunarity (default: 2.0)
+    --scale           Noise scale (default: 5.0)
+    --height-scale    Terrain height scale (default: 2.0)
+    --size            Grid size (default: 25)
+    --fly             Enable free-flying camera mode
+'''
 
-Controls (Fly Mode - enabled with --fly flag):
-- W/A/S/D: Move forward/left/backward/right
-- Space/Shift: Move up/down
-- Mouse: Look around
-- E key: Reset position
-- Q key: Toggle mouse capture
-- ESC key: Exit application
-
-Command line arguments allow customization of terrain parameters including
-noise type, seed, octaves, persistence, lacunarity, scale, and height.
-"""
-
-# Standard library imports
 import sys
 import math
 import random
 import argparse
 
-# Third-party imports
 import pygame
 from pygame.locals import (
-    QUIT, KEYDOWN, KEYUP, VIDEORESIZE, MOUSEMOTION,
+    QUIT, KEYDOWN, VIDEORESIZE, MOUSEMOTION,
     K_ESCAPE, K_LEFT, K_RIGHT, K_UP, K_DOWN, 
     K_q, K_e, K_PLUS, K_MINUS, K_EQUALS,
     K_w, K_a, K_s, K_d, K_SPACE, K_LSHIFT,
     OPENGL, DOUBLEBUF, RESIZABLE
 )
+
 import numpy as np
 import noise
+
 from OpenGL.GL import (
-    glEnable, glDisable, glClear, glClearColor, glBegin, glEnd, 
+    glEnable, glClear, glClearColor, glBegin, glEnd, 
     glVertex3fv, glNormal3fv, glColor3f, glMatrixMode, glLoadIdentity,
     glRotatef, glLightfv, glColorMaterial, glViewport,
     GL_LIGHTING, GL_LIGHT0, GL_COLOR_MATERIAL, GL_FRONT_AND_BACK,
@@ -54,486 +45,257 @@ from OpenGL.GL import (
 )
 from OpenGL.GLU import gluPerspective, gluLookAt
 
-# =============================================================================
-# CONFIGURATION CONSTANTS
-# =============================================================================
 
-# Display settings
+# Global configuration constants
 WIDTH, HEIGHT = 800, 600
+TERRAIN_SIZE = 25
+TERRAIN_SCALE = 0.5
+TERRAIN_HEIGHT_SCALE = 2.0
+TERRAIN_COLOR = (0.8, 0.8, 0.8)
 
-# Terrain generation settings
-TERRAIN_SIZE = 25        # Size of terrain grid (TERRAIN_SIZE x TERRAIN_SIZE)
-TERRAIN_SCALE = 0.5      # Scale of each terrain cell
-TERRAIN_HEIGHT_SCALE = 2.0  # Scale factor for terrain height
-TERRAIN_COLOR = (0.8, 0.8, 0.8)  # Light gray
+NOISE_SCALE = 5.0
+NOISE_OCTAVES = 6
+NOISE_PERSISTENCE = 0.5
+NOISE_LACUNARITY = 2.0
 
-# Noise generation settings
-NOISE_SCALE = 5.0        # Scale factor for noise
-NOISE_OCTAVES = 6        # Number of octaves for noise
-NOISE_PERSISTENCE = 0.5  # Persistence for noise
-NOISE_LACUNARITY = 2.0   # Lacunarity for noise
+SKY_COLOR = (0.7, 0.8, 0.9, 1.0)
+ROTATION_SPEED = 1.0
+ZOOM_SPEED = 0.5
 
-# Visual settings
-SKY_COLOR = (0.7, 0.8, 0.9, 1.0)  # Light blue
-ROTATION_SPEED = 1.0     # Speed of camera rotation when using arrow keys
-ZOOM_SPEED = 0.5         # Speed of camera zoom when using + and - keys
+FLY_MOVE_SPEED = 0.1
+FLY_MOUSE_SENSITIVITY = 0.2
+FLY_INITIAL_POSITION = [0.0, 5.0, 10.0]
 
-# Free-flying camera settings
-FLY_MOVE_SPEED = 0.1     # Speed of camera movement in fly mode
-FLY_MOUSE_SENSITIVITY = 0.2  # Mouse sensitivity in fly mode
-FLY_INITIAL_POSITION = [0.0, 5.0, 10.0]  # Initial camera position in fly mode
-
-# =============================================================================
-# TERRAIN GENERATION
-# =============================================================================
 
 class Terrain:
-    """
-    Represents a 3D terrain generated using procedural noise algorithms.
-    
-    The terrain is created as a grid of vertices, with height determined by
-    the selected noise algorithm. The class handles both generation and rendering.
-    
-    Attributes:
-        vertices (list): List of (x, y, z) vertex coordinates
-        triangles (list): List of triangle indices for rendering
-        noise_type (str): Type of noise algorithm used
-        seed (int): Random seed for noise generation
-        noise_params (dict): Parameters for noise generation
-    """
-    
+    """Terrain object generated with procedural noise."""
     def __init__(self, noise_type='perlin', seed=None, **noise_params):
-        """
-        Initialize a new terrain with the specified noise parameters.
-        
-        Args:
-            noise_type (str): Type of noise to use ('perlin', 'simplex', 'ridged', 
-                             'billow', 'voronoi', or 'combined')
-            seed (int, optional): Random seed for noise generation
-            **noise_params: Additional parameters for noise generation
-                - octaves: Number of octaves for noise
-                - persistence: Persistence value for noise
-                - lacunarity: Lacunarity value for noise
-                - scale: Scale factor for noise
-                - height_scale: Scale factor for terrain height
-        """
         self.vertices = []
         self.triangles = []
         self.noise_type = noise_type
         self.seed = seed if seed is not None else random.randint(0, 10000)
         self.noise_params = noise_params
+        # Generate terrain immediately upon instantiation
         self.generate_terrain()
-        
+
     def generate_terrain(self):
-        """
-        Generate the terrain using the specified noise algorithm.
-        
-        This method creates a height map using the selected noise algorithm,
-        then converts it to 3D vertices and triangles for rendering.
-        """
-        # Extract noise parameters with defaults
+        """Generate the height map, vertices, and triangle indices."""
+        # Extract noise parameters with fallback to default globals
         octaves = self.noise_params.get('octaves', NOISE_OCTAVES)
         persistence = self.noise_params.get('persistence', NOISE_PERSISTENCE)
         lacunarity = self.noise_params.get('lacunarity', NOISE_LACUNARITY)
         scale = self.noise_params.get('scale', NOISE_SCALE)
         height_scale = self.noise_params.get('height_scale', TERRAIN_HEIGHT_SCALE)
         
-        # Generate height map using selected noise algorithm
+        # Create the 2D height map using the selected noise algorithm
         height_map = self._generate_height_map(octaves, persistence, lacunarity, scale)
         
-        # Create vertices from height map
+        # Convert height map to 3D vertices
         self._create_vertices(height_map, height_scale)
         
-        # Create triangles (indices) for rendering
+        # Generate triangles (mesh indices) from the vertices
         self._create_triangles()
-    
+
     def _generate_height_map(self, octaves, persistence, lacunarity, scale):
-        """
-        Generate a height map using the selected noise algorithm.
-        
-        Args:
-            octaves (int): Number of octaves for noise
-            persistence (float): Persistence value for noise
-            lacunarity (float): Lacunarity value for noise
-            scale (float): Scale factor for noise
-            
-        Returns:
-            numpy.ndarray: 2D array of height values
-        """
+        """Create a 2D height map using the selected noise algorithm."""
         height_map = np.zeros((TERRAIN_SIZE, TERRAIN_SIZE))
-        
         for i in range(TERRAIN_SIZE):
             for j in range(TERRAIN_SIZE):
+                # Normalize grid coordinates for noise input
                 nx = i / TERRAIN_SIZE * scale
                 ny = j / TERRAIN_SIZE * scale
                 
-                # Generate height based on noise type
+                # Select and apply the noise algorithm based on noise_type
                 if self.noise_type == 'perlin':
-                    height_map[i][j] = noise.pnoise2(
-                        nx, ny, 
-                        octaves=octaves, 
-                        persistence=persistence, 
-                        lacunarity=lacunarity,
-                        base=self.seed
-                    )
+                    height_map[i][j] = noise.pnoise2(nx, ny, octaves=octaves,
+                                                      persistence=persistence,
+                                                      lacunarity=lacunarity,
+                                                      base=self.seed)
                 elif self.noise_type == 'simplex':
-                    height_map[i][j] = noise.snoise2(
-                        nx, ny, 
-                        octaves=octaves, 
-                        persistence=persistence, 
-                        lacunarity=lacunarity,
-                        base=self.seed
-                    )
+                    height_map[i][j] = noise.snoise2(nx, ny, octaves=octaves,
+                                                      persistence=persistence,
+                                                      lacunarity=lacunarity,
+                                                      base=self.seed)
                 elif self.noise_type == 'ridged':
-                    # Ridged multifractal noise (absolute value of simplex noise)
-                    value = abs(noise.snoise2(
-                        nx, ny, 
-                        octaves=octaves, 
-                        persistence=persistence, 
-                        lacunarity=lacunarity,
-                        base=self.seed
-                    ))
-                    height_map[i][j] = 1.0 - value  # Invert to create ridges
+                    # Ridged noise inverts the absolute Simplex noise for ridge effect
+                    value = abs(noise.snoise2(nx, ny, octaves=octaves,
+                                               persistence=persistence,
+                                               lacunarity=lacunarity,
+                                               base=self.seed))
+                    height_map[i][j] = 1.0 - value
                 elif self.noise_type == 'billow':
-                    # Billow noise (absolute value of perlin noise)
-                    value = abs(noise.pnoise2(
-                        nx, ny, 
-                        octaves=octaves, 
-                        persistence=persistence, 
-                        lacunarity=lacunarity,
-                        base=self.seed
-                    ))
-                    height_map[i][j] = value * 2.0 - 1.0  # Scale to -1 to 1 range
+                    # Billow noise uses absolute Perlin noise scaled to [-1, 1]
+                    value = abs(noise.pnoise2(nx, ny, octaves=octaves,
+                                               persistence=persistence,
+                                               lacunarity=lacunarity,
+                                               base=self.seed))
+                    height_map[i][j] = value * 2.0 - 1.0
                 elif self.noise_type == 'voronoi':
-                    # Simple Voronoi-like noise
+                    # Use a custom Voronoi-like noise function
                     height_map[i][j] = self._voronoi_noise(nx, ny)
                 elif self.noise_type == 'combined':
-                    # Combination of perlin and simplex
-                    perlin = noise.pnoise2(
-                        nx, ny, 
-                        octaves=octaves, 
-                        persistence=persistence, 
-                        lacunarity=lacunarity, 
-                        base=self.seed
-                    )
-                    simplex = noise.snoise2(
-                        nx * 2, ny * 2, 
-                        octaves=octaves, 
-                        persistence=persistence, 
-                        lacunarity=lacunarity, 
-                        base=self.seed + 1000
-                    )
+                    # Combine Perlin and Simplex noise for varied terrain
+                    perlin = noise.pnoise2(nx, ny, octaves=octaves,
+                                            persistence=persistence,
+                                            lacunarity=lacunarity,
+                                            base=self.seed)
+                    simplex = noise.snoise2(nx * 2, ny * 2, octaves=octaves,
+                                             persistence=persistence,
+                                             lacunarity=lacunarity,
+                                             base=self.seed + 1000)
                     height_map[i][j] = (perlin + simplex) * 0.5
                 else:
-                    # Default to perlin
-                    height_map[i][j] = noise.pnoise2(
-                        nx, ny, 
-                        octaves=octaves, 
-                        persistence=persistence, 
-                        lacunarity=lacunarity,
-                        base=self.seed
-                    )
-        
+                    # Default to Perlin noise if unknown type
+                    height_map[i][j] = noise.pnoise2(nx, ny, octaves=octaves,
+                                                      persistence=persistence,
+                                                      lacunarity=lacunarity,
+                                                      base=self.seed)
         return height_map
-    
+
     def _create_vertices(self, height_map, height_scale):
-        """
-        Create 3D vertices from the height map.
-        
-        Args:
-            height_map (numpy.ndarray): 2D array of height values
-            height_scale (float): Scale factor for terrain height
-        """
+        """Convert the height map into 3D vertices."""
         self.vertices = []
         for i in range(TERRAIN_SIZE):
             for j in range(TERRAIN_SIZE):
-                x = (i - TERRAIN_SIZE/2) * TERRAIN_SCALE
-                z = (j - TERRAIN_SIZE/2) * TERRAIN_SCALE
+                # Offset the grid so that the terrain is centered
+                x = (i - TERRAIN_SIZE / 2) * TERRAIN_SCALE
+                z = (j - TERRAIN_SIZE / 2) * TERRAIN_SCALE
+                # Scale the noise value to get the height
                 y = height_map[i][j] * height_scale
                 self.vertices.append((x, y, z))
-    
+
     def _create_triangles(self):
-        """
-        Create triangles (indices) for rendering the terrain.
-        
-        Each grid cell is divided into two triangles.
-        """
+        """Generate triangle indices for rendering the terrain."""
         self.triangles = []
         for i in range(TERRAIN_SIZE - 1):
             for j in range(TERRAIN_SIZE - 1):
-                # Calculate vertex indices
+                # Compute vertex indices for the current cell
                 a = i * TERRAIN_SIZE + j
-                b = i * TERRAIN_SIZE + (j + 1)
+                b = a + 1
                 c = (i + 1) * TERRAIN_SIZE + j
-                d = (i + 1) * TERRAIN_SIZE + (j + 1)
-                
-                # Create two triangles per grid cell
+                d = c + 1
+                # Form two triangles for each quad in the grid
                 self.triangles.append((a, b, c))
                 self.triangles.append((b, d, c))
-    
+
     def _voronoi_noise(self, x, y):
-        """
-        Generate Voronoi-like noise.
-        
-        Args:
-            x (float): X coordinate
-            y (float): Y coordinate
-            
-        Returns:
-            float: Noise value in range approximately -0.5 to 0.5
-        """
-        # Generate a set of random points
+        """Simple Voronoi-like noise function."""
         points = []
         random.seed(self.seed)
-        for _ in range(10):  # Number of cells
+        for _ in range(10):
+            # Randomly generate 10 points in a 10x10 space
             points.append((random.random() * 10, random.random() * 10))
-        
-        # Find distance to closest point
-        min_dist = float('inf')
-        for px, py in points:
-            dist = math.sqrt((x - px) ** 2 + (y - py) ** 2)
-            min_dist = min(min_dist, dist)
-        
-        # Normalize and return
-        return min_dist / 2.0 - 0.5  # Scale to approximately -0.5 to 0.5 range
-    
+        # Find the minimum distance from (x, y) to any random point
+        min_dist = min(math.sqrt((x - px) ** 2 + (y - py) ** 2) for px, py in points)
+        # Normalize the distance to roughly [-0.5, 0.5]
+        return min_dist / 2.0 - 0.5
+
     def render(self):
-        """
-        Render the terrain using OpenGL.
-        
-        This method draws the terrain as a collection of triangles with proper
-        lighting normals for each face.
-        """
+        """Render the terrain using OpenGL."""
+        # Set the terrain color
         glColor3f(*TERRAIN_COLOR)
         glBegin(GL_TRIANGLES)
-        
-        for triangle in self.triangles:
-            # Calculate normal vector for the triangle for proper lighting
-            v1 = np.array(self.vertices[triangle[0]])
-            v2 = np.array(self.vertices[triangle[1]])
-            v3 = np.array(self.vertices[triangle[2]])
-            
-            # Calculate normal using cross product
+        for tri in self.triangles:
+            # Retrieve triangle vertices
+            v1 = np.array(self.vertices[tri[0]])
+            v2 = np.array(self.vertices[tri[1]])
+            v3 = np.array(self.vertices[tri[2]])
+            # Calculate surface normal for lighting
             normal = np.cross(v2 - v1, v3 - v1)
             normal = normal / np.linalg.norm(normal)
-            
-            # Set normal and draw vertices
             glNormal3fv(normal)
-            glVertex3fv(self.vertices[triangle[0]])
-            glVertex3fv(self.vertices[triangle[1]])
-            glVertex3fv(self.vertices[triangle[2]])
-            
+            # Specify the vertices of the triangle
+            glVertex3fv(self.vertices[tri[0]])
+            glVertex3fv(self.vertices[tri[1]])
+            glVertex3fv(self.vertices[tri[2]])
         glEnd()
 
-# =============================================================================
-# OPENGL SETUP FUNCTIONS
-# =============================================================================
 
 def setup_lighting():
-    """
-    Configure OpenGL lighting for the scene.
-    
-    Sets up a single light source positioned above the terrain.
-    The light position is reset during rendering to maintain a fixed overhead position
-    even when the terrain rotates, creating dynamic shadows.
-    """
-    # Enable lighting
+    """Configure OpenGL lighting."""
     glEnable(GL_LIGHTING)
     glEnable(GL_LIGHT0)
     glEnable(GL_COLOR_MATERIAL)
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
-    
-    # Set up initial light position (overhead)
+    # Set light position directly above the terrain
     light_position = [0.0, 10.0, 0.0, 1.0]
     glLightfv(GL_LIGHT0, GL_POSITION, light_position)
-    
-    # Set light properties
-    ambient_light = [0.3, 0.3, 0.3, 1.0]
-    diffuse_light = [0.7, 0.7, 0.7, 1.0]
-    glLightfv(GL_LIGHT0, GL_AMBIENT, ambient_light)
-    glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse_light)
+    glLightfv(GL_LIGHT0, GL_AMBIENT, [0.3, 0.3, 0.3, 1.0])
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, [0.7, 0.7, 0.7, 1.0])
+
 
 def setup_skybox():
-    """
-    Configure the background color for the scene.
-    """
+    """Set the background color."""
     glClearColor(*SKY_COLOR)
 
-def setup_isometric_view(width=WIDTH, height=HEIGHT):
-    """
-    Configure the camera perspective for an isometric-like view.
-    
-    Args:
-        width (int): Viewport width
-        height (int): Viewport height
-    """
+
+def setup_viewport(width=WIDTH, height=HEIGHT):
+    """Set perspective with an isometric view."""
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
+    # Set up the perspective projection
     gluPerspective(45, (width / height), 0.1, 50.0)
-    
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
-    
-    # Set up isometric-like view
-    # Position the camera to view the terrain from an isometric angle
-    gluLookAt(
-        10, 10, 10,  # Eye position
-        0, 0, 0,     # Look at position
-        0, 1, 0      # Up vector
-    )
+    # Position the camera to get an isometric view
+    gluLookAt(10, 10, 10, 0, 0, 0, 0, 1, 0)
+
 
 def resize_window(width, height):
-    """
-    Update the viewport and perspective when window is resized.
-    
-    Args:
-        width (int): New window width
-        height (int): New window height
-    """
+    """Handle window resize events."""
     if height == 0:
-        height = 1  # Prevent division by zero
-    
-    # Update the viewport to the new window size
+        height = 1
     glViewport(0, 0, width, height)
-    
-    # Update the perspective projection
-    setup_isometric_view(width, height)
+    setup_viewport(width, height)
 
-# =============================================================================
-# COMMAND LINE ARGUMENT PARSING
-# =============================================================================
 
 def parse_arguments():
-    """
-    Parse command line arguments for terrain generation.
-    
-    Returns:
-        argparse.Namespace: Parsed command line arguments
-    """
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description='Procedural Terrain Simulation',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    
-    # Noise type
-    parser.add_argument(
-        '--noise', 
-        type=str, 
-        default='perlin',
-        choices=['perlin', 'simplex', 'ridged', 'billow', 'voronoi', 'combined'],
-        help='Type of noise to use for terrain generation'
-    )
-    
-    # Noise parameters
-    parser.add_argument(
-        '--seed', 
-        type=int, 
-        default=None,
-        help='Seed for random number generation'
-    )
-    parser.add_argument(
-        '--octaves', 
-        type=int, 
-        default=NOISE_OCTAVES,
-        help='Number of octaves for noise generation'
-    )
-    parser.add_argument(
-        '--persistence', 
-        type=float, 
-        default=NOISE_PERSISTENCE,
-        help='Persistence value for noise generation'
-    )
-    parser.add_argument(
-        '--lacunarity', 
-        type=float, 
-        default=NOISE_LACUNARITY,
-        help='Lacunarity value for noise generation'
-    )
-    parser.add_argument(
-        '--scale', 
-        type=float, 
-        default=NOISE_SCALE,
-        help='Scale factor for noise'
-    )
-    parser.add_argument(
-        '--height-scale', 
-        type=float, 
-        default=TERRAIN_HEIGHT_SCALE,
-        help='Scale factor for terrain height'
-    )
-    
-    # Terrain parameters
-    parser.add_argument(
-        '--size', 
-        type=int, 
-        default=TERRAIN_SIZE,
-        help='Size of terrain grid (size x size)'
-    )
-    
-    # Camera mode
-    parser.add_argument(
-        '--fly',
-        action='store_true',
-        help='Enable free-flying camera mode with WASD movement and mouse look'
-    )
-    
+    parser.add_argument('--noise', type=str, default='perlin',
+                        choices=['perlin', 'simplex', 'ridged', 'billow', 'voronoi', 'combined'],
+                        help='Noise type for terrain generation')
+    parser.add_argument('--seed', type=int, default=None, help='Seed for random generation')
+    parser.add_argument('--octaves', type=int, default=NOISE_OCTAVES, help='Noise octaves')
+    parser.add_argument('--persistence', type=float, default=NOISE_PERSISTENCE, help='Noise persistence')
+    parser.add_argument('--lacunarity', type=float, default=NOISE_LACUNARITY, help='Noise lacunarity')
+    parser.add_argument('--scale', type=float, default=NOISE_SCALE, help='Noise scale')
+    parser.add_argument('--height-scale', type=float, default=TERRAIN_HEIGHT_SCALE, help='Terrain height scale')
+    parser.add_argument('--size', type=int, default=TERRAIN_SIZE, help='Terrain grid size')
+    parser.add_argument('--fly', action='store_true', help='Enable fly camera mode')
     return parser.parse_args()
 
-# =============================================================================
-# MAIN APPLICATION
-# =============================================================================
 
 def main():
-    """
-    Main application entry point.
-    
-    Initializes the application, sets up the OpenGL environment,
-    generates the terrain, and runs the main game loop.
-    
-    Controls:
-        Arrow keys: Rotate the terrain (in orbit mode)
-        +/- keys: Zoom in/out (in orbit mode)
-        E key: Reset camera position
-        Q key: Toggle mouse capture
-        Escape key: Exit the application
-        
-        In fly mode (--fly flag):
-            W/A/S/D: Move forward/left/backward/right
-            Space/Shift: Move up/down
-            Mouse: Look around
-    """
-    # Parse command line arguments
+    """Main entry point."""
     args = parse_arguments()
-    
-    # Update global parameters based on arguments
     global TERRAIN_SIZE, NOISE_SCALE, NOISE_OCTAVES, NOISE_PERSISTENCE, NOISE_LACUNARITY, TERRAIN_HEIGHT_SCALE
+    # Update global parameters based on command-line arguments
     TERRAIN_SIZE = args.size
     NOISE_SCALE = args.scale
     NOISE_OCTAVES = args.octaves
     NOISE_PERSISTENCE = args.persistence
     NOISE_LACUNARITY = args.lacunarity
     TERRAIN_HEIGHT_SCALE = args.height_scale
-    
-    # Initialize pygame
+
     pygame.init()
     display = pygame.display.set_mode((WIDTH, HEIGHT), DOUBLEBUF | OPENGL | RESIZABLE)
-    pygame.display.set_caption(f"Procedural Terrain Simulation - {args.noise.capitalize()} Noise")
-    
+    pygame.display.set_caption(f"Procedural Terrain - {args.noise.capitalize()} Noise")
     try:
-        # Set window icon
+        # Attempt to load and set an icon
         icon = pygame.image.load('icon.png')
         pygame.display.set_icon(icon)
     except pygame.error:
-        # If icon.png is not found, continue without setting an icon
         pass
-    
-    # Set up OpenGL
+
     glEnable(GL_DEPTH_TEST)
     setup_lighting()
     setup_skybox()
-    setup_isometric_view()
-    
-    # Generate terrain with specified noise type and parameters
+    setup_viewport()
+
     noise_params = {
         'octaves': args.octaves,
         'persistence': args.persistence,
@@ -541,14 +303,9 @@ def main():
         'scale': args.scale,
         'height_scale': args.height_scale
     }
-    
-    terrain = Terrain(
-        noise_type=args.noise,
-        seed=args.seed,
-        **noise_params
-    )
-    
-    # Initialize camera state
+    terrain = Terrain(noise_type=args.noise, seed=args.seed, **noise_params)
+
+    # Set up the initial camera state
     camera_state = {
         'rotation_x': 0,
         'rotation_y': 0,
@@ -560,47 +317,34 @@ def main():
         'pitch': 0,
         'last_mouse_pos': None
     }
-    
-    # Store initial values for reset
+    # Store the initial camera state for resetting the view
     initial_state = {
-        'rotation_x': camera_state['rotation_x'],
-        'rotation_y': camera_state['rotation_y'],
-        'zoom_distance': camera_state['zoom_distance'],
+        'rotation_x': 0,
+        'rotation_y': 0,
+        'zoom_distance': 10.0,
         'position': FLY_INITIAL_POSITION.copy(),
         'yaw': 0,
         'pitch': 0
     }
-    
-    # If fly mode is enabled, capture the mouse by default
     if camera_state['fly_mode']:
+        # In fly mode, capture the mouse and hide the cursor
         camera_state['mouse_captured'] = True
         pygame.mouse.set_visible(False)
         pygame.event.set_grab(True)
         pygame.mouse.set_pos(WIDTH // 2, HEIGHT // 2)
         camera_state['last_mouse_pos'] = (WIDTH // 2, HEIGHT // 2)
-    
-    # Run the main game loop
+
     run_game_loop(display, terrain, camera_state, initial_state)
-    
-    # Clean up and exit
     pygame.quit()
     sys.exit()
 
+
 def run_game_loop(display, terrain, camera_state, initial_state):
-    """
-    Run the main game loop.
-    
-    Args:
-        display: Pygame display surface
-        terrain: Terrain object to render
-        camera_state (dict): Current camera state
-        initial_state (dict): Initial camera state for reset
-    """
+    """Run the main game loop."""
     clock = pygame.time.Clock()
     running = True
-    
-    # Display control information if in fly mode
     if camera_state['fly_mode']:
+        # Print fly mode controls in the console
         print("\nFly Mode Controls:")
         print("  W/A/S/D: Move forward/left/backward/right")
         print("  Space/Shift: Move up/down")
@@ -608,50 +352,33 @@ def run_game_loop(display, terrain, camera_state, initial_state):
         print("  Q: Toggle mouse capture")
         print("  E: Reset camera position")
         print("  Escape: Exit\n")
-    
     while running:
-        # Handle events
+        # Process events and update running state
         running = handle_events(display, camera_state, initial_state)
-        
-        # Handle keyboard input for rotation
+        # Update camera based on keyboard input
         handle_keyboard_input(camera_state)
-        
-        # Render the scene
+        # Render the current frame
         render_scene(terrain, camera_state)
-        
-        # Update display and maintain frame rate
-        pygame.display.flip()
-        clock.tick(60)
-    
-    # Ensure mouse is visible and not captured when exiting
+        pygame.display.flip()  # Update the full display surface to the screen
+        clock.tick(60)  # Limit to 60 frames per second
+    # Ensure the mouse becomes visible and ungrabbed when exiting
     pygame.mouse.set_visible(True)
     pygame.event.set_grab(False)
 
+
 def handle_events(display, camera_state, initial_state):
-    """
-    Handle pygame events.
-    
-    Args:
-        display: Pygame display surface
-        camera_state (dict): Current camera state
-        initial_state (dict): Initial camera state for reset
-        
-    Returns:
-        bool: True if the application should continue running, False if it should exit
-    """
+    """Process Pygame events."""
     for event in pygame.event.get():
         if event.type == QUIT:
             return False
-            
         elif event.type == VIDEORESIZE:
-            # Handle window resize event
+            # Handle window resize by resetting the display mode and viewport
             width, height = event.size
             display = pygame.display.set_mode((width, height), DOUBLEBUF | OPENGL | RESIZABLE)
             resize_window(width, height)
-            
         elif event.type == KEYDOWN:
-            # Reset terrain position when 'e' is pressed
             if event.key == K_e:
+                # Reset camera to initial state when 'E' is pressed
                 if camera_state['fly_mode']:
                     camera_state['position'] = initial_state['position'].copy()
                     camera_state['yaw'] = initial_state['yaw']
@@ -660,100 +387,73 @@ def handle_events(display, camera_state, initial_state):
                     camera_state['rotation_x'] = initial_state['rotation_x']
                     camera_state['rotation_y'] = initial_state['rotation_y']
                     camera_state['zoom_distance'] = initial_state['zoom_distance']
-            
-            # Toggle mouse capture when 'q' is pressed
             elif event.key == K_q:
+                # Toggle mouse capture on 'Q' press
                 camera_state['mouse_captured'] = not camera_state['mouse_captured']
                 pygame.mouse.set_visible(not camera_state['mouse_captured'])
                 pygame.event.set_grab(camera_state['mouse_captured'])
                 if camera_state['mouse_captured']:
                     pygame.mouse.set_pos(WIDTH // 2, HEIGHT // 2)
                     camera_state['last_mouse_pos'] = (WIDTH // 2, HEIGHT // 2)
-            
-            # Exit simulation when 'Escape' is pressed
             elif event.key == K_ESCAPE:
                 return False
-            
-            # Zoom in with + key (also handle = key which is the unshifted + on most keyboards)
-            elif event.key == K_PLUS or event.key == K_EQUALS:
-                if not camera_state['fly_mode']:
-                    camera_state['zoom_distance'] = max(2.0, camera_state['zoom_distance'] - ZOOM_SPEED)
-            
-            # Zoom out with - key
-            elif event.key == K_MINUS:
-                if not camera_state['fly_mode']:
-                    camera_state['zoom_distance'] = min(20.0, camera_state['zoom_distance'] + ZOOM_SPEED)
-        
-        # Handle mouse movement for free-flying camera
+            elif event.key in (K_PLUS, K_EQUALS) and not camera_state['fly_mode']:
+                # Zoom in when '+' or '=' is pressed in orbit mode
+                camera_state['zoom_distance'] = max(2.0, camera_state['zoom_distance'] - ZOOM_SPEED)
+            elif event.key == K_MINUS and not camera_state['fly_mode']:
+                # Zoom out when '-' is pressed in orbit mode
+                camera_state['zoom_distance'] = min(20.0, camera_state['zoom_distance'] + ZOOM_SPEED)
         elif event.type == MOUSEMOTION and camera_state['mouse_captured'] and camera_state['fly_mode']:
+            # Update camera orientation based on mouse movement in fly mode
             if camera_state['last_mouse_pos'] is None:
                 camera_state['last_mouse_pos'] = event.pos
             else:
                 dx = event.pos[0] - camera_state['last_mouse_pos'][0]
                 dy = event.pos[1] - camera_state['last_mouse_pos'][1]
-                
-                # Update camera yaw and pitch
                 camera_state['yaw'] -= dx * FLY_MOUSE_SENSITIVITY
-                camera_state['pitch'] -= dy * FLY_MOUSE_SENSITIVITY
-                
-                # Clamp pitch to avoid gimbal lock
-                camera_state['pitch'] = max(-89.0, min(89.0, camera_state['pitch']))
-                
-                # Reset mouse position to center to allow for continuous rotation
+                # Clamp the pitch to avoid flipping
+                camera_state['pitch'] = max(-89.0, min(89.0, camera_state['pitch'] - dy * FLY_MOUSE_SENSITIVITY))
+                # Reset the mouse position to the center for continuous movement
                 pygame.mouse.set_pos(WIDTH // 2, HEIGHT // 2)
                 camera_state['last_mouse_pos'] = (WIDTH // 2, HEIGHT // 2)
-    
     return True
 
+
 def handle_keyboard_input(camera_state):
-    """
-    Handle keyboard input for camera control.
-    
-    Args:
-        camera_state (dict): Current camera state
-    """
+    """Update camera state based on keyboard input."""
     keys = pygame.key.get_pressed()
-    
     if camera_state['fly_mode']:
-        # Calculate forward vector based on yaw and pitch
+        # Calculate directional vectors based on current yaw and pitch
         yaw_rad = math.radians(camera_state['yaw'])
         pitch_rad = math.radians(camera_state['pitch'])
-        
-        # Forward vector
-        forward_x = math.sin(yaw_rad) * math.cos(pitch_rad)
-        forward_y = math.sin(pitch_rad)
-        forward_z = math.cos(yaw_rad) * math.cos(pitch_rad)
-        
-        # Right vector (cross product of forward and world up)
-        right_x = math.sin(yaw_rad - math.pi/2)
-        right_y = 0
-        right_z = math.cos(yaw_rad - math.pi/2)
-        
-        # Handle WASD movement
-        if keys[pygame.K_w]:  # Forward
-            camera_state['position'][0] += forward_x * FLY_MOVE_SPEED
-            camera_state['position'][1] += forward_y * FLY_MOVE_SPEED
-            camera_state['position'][2] += forward_z * FLY_MOVE_SPEED
-        if keys[pygame.K_s]:  # Backward
-            camera_state['position'][0] -= forward_x * FLY_MOVE_SPEED
-            camera_state['position'][1] -= forward_y * FLY_MOVE_SPEED
-            camera_state['position'][2] -= forward_z * FLY_MOVE_SPEED
-        if keys[pygame.K_a]:  # Left
-            camera_state['position'][0] -= right_x * FLY_MOVE_SPEED
-            camera_state['position'][1] -= right_y * FLY_MOVE_SPEED
-            camera_state['position'][2] -= right_z * FLY_MOVE_SPEED
-        if keys[pygame.K_d]:  # Right
-            camera_state['position'][0] += right_x * FLY_MOVE_SPEED
-            camera_state['position'][1] += right_y * FLY_MOVE_SPEED
-            camera_state['position'][2] += right_z * FLY_MOVE_SPEED
-        
-        # Up/Down movement (space/shift)
-        if keys[pygame.K_SPACE]:  # Up
+        forward = (
+            math.sin(yaw_rad) * math.cos(pitch_rad),
+            math.sin(pitch_rad),
+            math.cos(yaw_rad) * math.cos(pitch_rad)
+        )
+        right = (math.sin(yaw_rad - math.pi/2), 0, math.cos(yaw_rad - math.pi/2))
+        if keys[pygame.K_w]:
+            camera_state['position'][0] += forward[0] * FLY_MOVE_SPEED
+            camera_state['position'][1] += forward[1] * FLY_MOVE_SPEED
+            camera_state['position'][2] += forward[2] * FLY_MOVE_SPEED
+        if keys[pygame.K_s]:
+            camera_state['position'][0] -= forward[0] * FLY_MOVE_SPEED
+            camera_state['position'][1] -= forward[1] * FLY_MOVE_SPEED
+            camera_state['position'][2] -= forward[2] * FLY_MOVE_SPEED
+        if keys[pygame.K_a]:
+            camera_state['position'][0] -= right[0] * FLY_MOVE_SPEED
+            camera_state['position'][1] -= right[1] * FLY_MOVE_SPEED
+            camera_state['position'][2] -= right[2] * FLY_MOVE_SPEED
+        if keys[pygame.K_d]:
+            camera_state['position'][0] += right[0] * FLY_MOVE_SPEED
+            camera_state['position'][1] += right[1] * FLY_MOVE_SPEED
+            camera_state['position'][2] += right[2] * FLY_MOVE_SPEED
+        if keys[pygame.K_SPACE]:
             camera_state['position'][1] += FLY_MOVE_SPEED
-        if keys[pygame.K_LSHIFT]:  # Down
+        if keys[pygame.K_LSHIFT]:
             camera_state['position'][1] -= FLY_MOVE_SPEED
     else:
-        # Original orbit camera controls
+        # In orbit mode, use arrow keys to rotate the view
         if keys[pygame.K_LEFT]:
             camera_state['rotation_y'] += ROTATION_SPEED
         if keys[pygame.K_RIGHT]:
@@ -763,62 +463,40 @@ def handle_keyboard_input(camera_state):
         if keys[pygame.K_DOWN]:
             camera_state['rotation_x'] -= ROTATION_SPEED
 
+
 def render_scene(terrain, camera_state):
-    """
-    Render the scene with the current camera settings.
-    
-    Args:
-        terrain: Terrain object to render
-        camera_state (dict): Current camera state
-    """
-    # Clear the screen
+    """Render the scene with the current camera configuration."""
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-    
-    # Apply camera transformations
     glLoadIdentity()
-    
     if camera_state['fly_mode']:
-        # Free-flying camera mode
-        # Calculate look-at point based on yaw and pitch
+        # In fly mode, set the camera based on current position and orientation
         yaw_rad = math.radians(camera_state['yaw'])
         pitch_rad = math.radians(camera_state['pitch'])
-        
-        # Calculate the look-at point
-        look_x = camera_state['position'][0] + math.sin(yaw_rad) * math.cos(pitch_rad)
-        look_y = camera_state['position'][1] + math.sin(pitch_rad)
-        look_z = camera_state['position'][2] + math.cos(yaw_rad) * math.cos(pitch_rad)
-        
-        # Set up the camera
+        look_at = (
+            camera_state['position'][0] + math.sin(yaw_rad) * math.cos(pitch_rad),
+            camera_state['position'][1] + math.sin(pitch_rad),
+            camera_state['position'][2] + math.cos(yaw_rad) * math.cos(pitch_rad)
+        )
         gluLookAt(
-            camera_state['position'][0], camera_state['position'][1], camera_state['position'][2],  # Eye position
-            look_x, look_y, look_z,  # Look at position
-            0, 1, 0                  # Up vector
+            camera_state['position'][0], camera_state['position'][1], camera_state['position'][2],
+            look_at[0], look_at[1], look_at[2],
+            0, 1, 0
         )
     else:
-        # Original orbit camera mode
-        # Position camera with zoom
-        zoom = camera_state['zoom_distance']
+        # Orbit mode: position the camera at an equal distance from the origin
         gluLookAt(
-            zoom, zoom, zoom,  # Eye position with zoom
-            0, 0, 0,           # Look at position
-            0, 1, 0            # Up vector
+            camera_state['zoom_distance'], camera_state['zoom_distance'], camera_state['zoom_distance'],
+            0, 0, 0,
+            0, 1, 0
         )
-    
-    # Apply rotations
+    # Apply rotations from orbit mode
     glRotatef(camera_state['rotation_x'], 1, 0, 0)
     glRotatef(camera_state['rotation_y'], 0, 1, 0)
-    
-    # Reset light position to keep it fixed in world space (overhead)
-    # This ensures the light doesn't rotate with the terrain
-    light_position = [0.0, 10.0, 0.0, 1.0]
-    glLightfv(GL_LIGHT0, GL_POSITION, light_position)
-    
-    # Render terrain
+    # Keep the light source fixed overhead
+    glLightfv(GL_LIGHT0, GL_POSITION, [0.0, 10.0, 0.0, 1.0])
+    # Render the terrain mesh
     terrain.render()
 
-# =============================================================================
-# ENTRY POINT
-# =============================================================================
 
 if __name__ == "__main__":
     main()

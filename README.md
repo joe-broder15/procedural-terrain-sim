@@ -1,104 +1,126 @@
-# Procedural Terrain Simulation
+# Procedural Terrain Simulator
 
-A low-poly procedural terrain generator that creates terrain based on noise functions. The terrain is rendered in a 3D window with a light blue skybox and overhead lighting.
+A 3D terrain generator and viewer that creates realistic landscapes using various procedural noise algorithms. Built with Python, PyOpenGL, and Pygame, this application renders interactive 3D terrain in real-time.
 
 ## Features
 
-- Procedurally generated terrain using multiple noise types:
-  - Perlin noise (default)
-  - Simplex noise
-  - Ridged multifractal noise
-  - Billow noise
-  - Voronoi-like noise
-  - Combined noise (Perlin + Simplex)
-- Low-poly aesthetic with light gray terrain
-- Light blue skybox
-- Isometric view of the terrain
-- Overhead lighting for better depth perception
-- Interactive camera rotation
-- Command line options for customizing terrain generation
+- **Multiple Noise Algorithms:**
+  - Perlin: Classic smooth noise pattern
+  - Simplex: Improved version of Perlin noise
+  - Ridged: Creates mountain-like ridges
+  - Billow: Produces cloud-like formations
+  - Voronoi: Creates cell-like patterns
+  - Combined: Blends Perlin and Simplex for varied terrain
+
+- **Interactive Camera Controls:**
+  - **Orbit Mode (Default):** Rotate around and zoom in/out of the terrain
+  - **Fly Mode:** First-person camera with WASD movement and mouse look
+
+- **Customizable Parameters:**
+  - Adjust noise settings (octaves, persistence, lacunarity, scale)
+  - Control terrain size and height
+  - Set random seed for reproducible results
 
 ## Requirements
 
-- Python 3.6+
-- pygame
+- Python 3.x
+- Pygame
 - PyOpenGL
-- PyOpenGL-accelerate
-- numpy
-- noise
+- NumPy
+- noise (Python noise library)
 
 ## Installation
 
 1. Clone this repository:
-```
-git clone https://github.com/yourusername/procedural-terrain-sim.git
-cd procedural-terrain-sim
-```
+   ```bash
+   git clone https://github.com/yourusername/procedural-terrain-sim.git
+   cd procedural-terrain-sim
+   ```
 
 2. Install the required dependencies:
-```
-pip install -r requirements.txt
-```
+   ```bash
+   pip install pygame PyOpenGL numpy noise
+   ```
 
 ## Usage
 
-Run the simulation with default settings:
-```
+Run the simulator with default settings:
+
+```bash
 python main.py
 ```
 
-### Command Line Options
+### Command-Line Arguments
 
-The simulation supports various command line options to customize the terrain generation:
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `--noise` | string | `perlin` | Noise algorithm (`perlin`, `simplex`, `ridged`, `billow`, `voronoi`, `combined`) |
+| `--seed` | integer | Random | Seed for random generation |
+| `--octaves` | integer | 6 | Number of noise octaves (detail levels) |
+| `--persistence` | float | 0.5 | How much each octave contributes to the overall shape |
+| `--lacunarity` | float | 2.0 | How frequency increases with each octave |
+| `--scale` | float | 5.0 | Overall scale of the noise pattern |
+| `--height-scale` | float | 2.0 | Vertical exaggeration of the terrain |
+| `--size` | integer | 25 | Size of the terrain grid (NxN) |
+| `--fly` | flag | False | Enable fly camera mode |
 
+### Examples
+
+Generate terrain with Simplex noise and custom parameters:
+```bash
+python main.py --noise simplex --seed 42 --octaves 8 --persistence 0.6 --scale 4.0
 ```
-python main.py --noise simplex --seed 42 --octaves 4 --persistence 0.6
+
+Use Voronoi noise with a larger grid:
+```bash
+python main.py --noise voronoi --size 40 --height-scale 3.0
 ```
 
-Available options:
+Explore terrain in fly mode:
+```bash
+python main.py --fly
+```
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--noise` | Type of noise to use (`perlin`, `simplex`, `ridged`, `billow`, `voronoi`, `combined`) | `perlin` |
-| `--seed` | Seed for random number generation | Random |
-| `--octaves` | Number of octaves for noise generation | 6 |
-| `--persistence` | Persistence value for noise generation | 0.5 |
-| `--lacunarity` | Lacunarity value for noise generation | 2.0 |
-| `--scale` | Scale factor for noise | 5.0 |
-| `--height-scale` | Scale factor for terrain height | 2.0 |
-| `--size` | Size of terrain grid (size x size) | 25 |
+## Controls
 
-### Noise Types
+### Orbit Mode (Default)
+| Control | Action |
+|---------|--------|
+| Arrow Keys | Rotate terrain view |
+| + / = | Zoom in |
+| - | Zoom out |
+| E | Reset view |
+| Q | Toggle mouse capture |
+| ESC | Exit application |
 
-- **Perlin**: Classic Perlin noise, produces smooth, natural-looking terrain
-- **Simplex**: Similar to Perlin but with fewer directional artifacts
-- **Ridged**: Creates ridge-like formations, good for mountains
-- **Billow**: Creates cloud-like, billowy terrain
-- **Voronoi**: Creates cell-like patterns, good for alien or crystalline landscapes
-- **Combined**: Combines Perlin and Simplex for more varied terrain
-
-### Controls
-
-- **Arrow Keys**: Rotate the camera view
-- **Close Window**: Exit the simulation
-
-## Customization
-
-In addition to command line options, you can modify the parameters directly in `main.py` to customize the terrain:
-
-- `TERRAIN_SIZE`: Size of the terrain grid (higher values create more detailed terrain but may reduce performance)
-- `TERRAIN_SCALE`: Scale of each terrain cell
-- `NOISE_SCALE`: Scale factor for noise (higher values create more varied terrain)
-- `NOISE_OCTAVES`: Number of octaves for noise (higher values add more detail)
-- `NOISE_PERSISTENCE`: Persistence for noise (controls how quickly amplitudes diminish for successive octaves)
-- `NOISE_LACUNARITY`: Lacunarity for noise (controls how quickly frequency increases for successive octaves)
-- `TERRAIN_HEIGHT_SCALE`: Scale factor for terrain height
-- `TERRAIN_COLOR`: Color of the terrain (default: light gray)
-- `SKY_COLOR`: Color of the skybox (default: light blue)
-- `ROTATION_SPEED`: Speed of camera rotation
+### Fly Mode (--fly)
+| Control | Action |
+|---------|--------|
+| W | Move forward |
+| S | Move backward |
+| A | Strafe left |
+| D | Strafe right |
+| Space | Move up |
+| Left Shift | Move down |
+| Mouse | Look around |
+| E | Reset camera position |
+| Q | Toggle mouse capture |
+| ESC | Exit application |
 
 ## How It Works
 
-The simulation uses various noise algorithms to generate a height map, which is then used to create a 3D mesh of triangles. The mesh is rendered using OpenGL with proper lighting to enhance the 3D effect.
+The terrain is generated using procedural noise algorithms to create a height map. This height map is then converted into a 3D mesh with vertices and triangles. The mesh is rendered using OpenGL with proper lighting and shading.
 
-The terrain is viewed from an isometric perspective, giving a good overview of the generated landscape.
+The application uses:
+- PyOpenGL for 3D rendering
+- Pygame for window management and input handling
+- NumPy for efficient array operations
+- Python noise library for procedural noise generation
+
+## License
+
+This project is open-source. Feel free to modify and distribute it as needed.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
